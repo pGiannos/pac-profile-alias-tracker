@@ -814,21 +814,22 @@
     return XHROpen.call(this, method, url, ...rest);
   };
 
-  // ---------- Modal watcher ----------
+  // ---------- Modal watcher (SAFE: only watch the open profile modal, not the whole body) ----------
   let moTimer = null;
+  let activeTarget = null;
+
   const mo = new MutationObserver((mutations) => {
+    // Ignore mutations from our own panel subtree
     for (const m of mutations) {
-      const target = m.target;
-      if (target && target.nodeType === 1) {
-        const el = target;
+      const t = m.target;
+      if (t && t.nodeType === 1) {
+        const el = t;
         if (el.id === PANEL_ID || el.closest?.(`#${PANEL_ID}`)) return;
       }
-      if (m.addedNodes) {
-        for (const n of m.addedNodes) {
-          if (n?.nodeType === 1) {
-            const el = n;
-            if (el.id === PANEL_ID || el.querySelector?.(`#${PANEL_ID}`)) return;
-          }
+      for (const n of m.addedNodes || []) {
+        if (n?.nodeType === 1) {
+          const el = n;
+          if (el.id === PANEL_ID || el.querySelector?.(`#${PANEL_ID}`)) return;
         }
       }
     }
@@ -850,15 +851,44 @@
       } else {
         const existing = document.getElementById(PANEL_ID);
         if (existing) existing.remove();
+        detachObserver();
       }
-    }, 50);
+    }, 80);
   });
 
-  mo.observe(document.body, { childList: true, subtree: true });
+  function attachObserver() {
+    // Observe the profile modal container if present; otherwise observe the open dialog (smaller than body)
+    const target =
+      document.querySelector(".profile-modal") ||
+      document.querySelector("dialog[open] .modal-body") ||
+      document.querySelector("dialog[open]") ||
+      null;
 
+    if (!target || target === activeTarget) return;
+
+    detachObserver();
+    activeTarget = target;
+    mo.observe(activeTarget, { childList: true, subtree: true });
+  }
+
+  function detachObserver() {
+    try { mo.disconnect(); } catch {}
+    activeTarget = null;
+  }
+
+  // Lightweight observer just to detect modal open/close and re-attach to the correct node
+  const rootMo = new MutationObserver(() => {
+    if (isProfileModalOpen()) attachObserver();
+    else detachObserver();
+  });
+  rootMo.observe(document.documentElement, { childList: true, subtree: true });
+
+  // Initial attach if already open
   if (isProfileModalOpen()) {
+    attachObserver();
     markModalNameSnapshot();
     ensureParentsAllowOverflow();
     scheduleRender({ profileId: "", currentName: getCurrentModalName() });
   }
+
 })();
