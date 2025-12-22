@@ -75,22 +75,34 @@
     return store.players[id];
   }
 
-  function addAlias(store, id, name) {
-    if (!id || !name) return { added: false };
-    const p = ensurePlayer(store, id);
-    p.lastSeen = Date.now();
+function addAlias(store, id, name) {
+  if (!id || !name) return { added: false };
 
-    // case-sensitive uniqueness
-    const exists = p.names.includes(name);
-    if (!exists) {
-      p.names.unshift(name);
-      if (p.names.length > MAX_NAMES_PER_PLAYER) p.names.length = MAX_NAMES_PER_PLAYER;
+  const p = ensurePlayer(store, id);
+  p.lastSeen = Date.now();
+
+  const idx = p.names.indexOf(name);
+
+  if (idx === -1) {
+    // New name ? add to front
+    p.names.unshift(name);
+    if (p.names.length > MAX_NAMES_PER_PLAYER) {
+      p.names.length = MAX_NAMES_PER_PLAYER;
     }
-
-    rebuildIndex(store);
-    saveStore(store);
-    return { added: !exists };
+  } else if (idx > 0) {
+    // Existing name ? move to front
+    p.names.splice(idx, 1);
+    p.names.unshift(name);
   }
+  // idx === 0 ? already most recent, do nothing
+
+  rebuildIndex(store);
+  saveStore(store);
+
+  return { added: idx !== 0 };
+}
+
+
 
   // ---------- Profile modal + ID detection ----------
   let lastModalName = "";
@@ -606,14 +618,11 @@ function ensureParentsAllowOverflow() {
       const pid = panelState.profileId;
       const currentName = panelState.currentName || getCurrentModalName() || "";
 
-      if (pid && currentName) {
-        const player = store.players?.[pid];
-        const names = Array.isArray(player?.names) ? player.names : [];
-        if (!names.includes(currentName)) {
-          const { added } = addAlias(store, pid, currentName);
-          panelState.justAdded = added;
-        }
-      }
+if (pid && currentName) {
+  const { added } = addAlias(store, pid, currentName);
+  panelState.justAdded = added;
+}
+
 
       const store2 = loadStore();
       const names2 = pid && store2.players?.[pid]?.names ? store2.players[pid].names : [];
@@ -715,7 +724,7 @@ function ensureParentsAllowOverflow() {
 
       // Only one copy button
       const copyBtn = document.createElement("button");
-      copyBtn.textContent = "Copy to clipboard";
+      copyBtn.textContent = "Copy";
       copyBtn.style.cssText = smallButtonCss();
       metaBtns.appendChild(copyBtn);
 
