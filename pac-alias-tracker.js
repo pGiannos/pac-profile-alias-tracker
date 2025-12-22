@@ -2,7 +2,7 @@
 // @name         PAC Profile Alias Tracker
 // @namespace    pac-helper
 // @description  Tracks past player names per PAC profile ID when opening the profile modal. Shows aliases, copy/export/import, and global search.
-// @version      1.0
+// @version      1.1
 // @match        *://pokemon-auto-chess.com/*
 // @match        *://*.pokemon-auto-chess.com/*
 // @run-at       document-idle
@@ -19,8 +19,11 @@
   const SEARCH_INPUT_ID = `${PANEL_ID}-search`;
   const SEARCH_RESULTS_ID = `${PANEL_ID}-search-results`;
 
-  // How far to push the panel to the right of the profile modal (tweak if you want)
-  const PANEL_OUTSIDE_OFFSET_PX = 377;
+  // How far to push the panel to the left of the profile modal (tweak if you want)
+  const PANEL_OUTSIDE_OFFSET_PX = 295;
+
+  // ? Draggable position persistence
+  const PANEL_POS_KEY = "pac_alias_panel_pos_v1";
 
   // Fonts
   if (!document.querySelector('link[href*="Jost"]')) {
@@ -146,20 +149,43 @@
   }
 
   // ---------- Mounting / positioning ----------
-  function ensureParentsAllowOverflow() {
-    const profileModal = document.querySelector(".profile-modal");
-    if (profileModal) {
-      profileModal.style.overflow = "visible";
-      const cs = getComputedStyle(profileModal);
-      if (cs.position === "static") profileModal.style.position = "relative";
+function ensureParentsAllowOverflow() {
+  const profileModal = document.querySelector(".profile-modal");
+
+  // helper: walk up a few parents and un-clip them
+  function unclipChain(el) {
+    let cur = el;
+    for (let i = 0; i < 8 && cur; i++) {
+      try {
+        cur.style.overflow = "visible";
+        cur.style.overflowX = "visible";
+        cur.style.overflowY = "visible";
+      } catch {}
+      cur = cur.parentElement;
     }
-
-    const dialog = document.querySelector("dialog.modal[open], dialog.modal.my-container[open], dialog[open]");
-    if (dialog) dialog.style.overflow = "visible";
-
-    const modalBody = document.querySelector("dialog[open] .modal-body");
-    if (modalBody) modalBody.style.overflow = "visible";
   }
+
+  if (profileModal) {
+    // keep our original behavior
+    profileModal.style.overflow = "visible";
+    profileModal.style.overflowX = "visible";
+    profileModal.style.overflowY = "visible";
+
+    const cs = getComputedStyle(profileModal);
+    if (cs.position === "static") profileModal.style.position = "relative";
+
+    // ? new: unclip ancestors too
+    unclipChain(profileModal);
+  }
+
+  // also unclip common dialog containers
+  const dialog = document.querySelector("dialog[open]");
+  if (dialog) unclipChain(dialog);
+
+  const modalBody = document.querySelector("dialog[open] .modal-body");
+  if (modalBody) unclipChain(modalBody);
+}
+
 
   function ensurePanelMounted(panel) {
     const host = document.querySelector(".profile-modal");
@@ -172,13 +198,148 @@
     }
   }
 
+  function loadPanelPos() {
+    try {
+      const raw = localStorage.getItem(PANEL_POS_KEY);
+      if (!raw) return null;
+      const p = JSON.parse(raw);
+      if (!p || typeof p !== "object") return null;
+      if (typeof p.left !== "number" || typeof p.top !== "number") return null;
+      return p;
+    } catch {
+      return null;
+    }
+  }
+
+  function savePanelPos(left, top) {
+    localStorage.setItem(PANEL_POS_KEY, JSON.stringify({ left, top }));
+  }
+
+  function resetPanelPos(panel) {
+    localStorage.removeItem(PANEL_POS_KEY);
+    // apply default immediately
+    panel.style.top = "-72px";
+    panel.style.left = `-${PANEL_OUTSIDE_OFFSET_PX}px`;
+  }
+
   function ensurePanelPosition(panel) {
     if (!panel) return;
     panel.style.position = "absolute";
-    panel.style.top = "-72px";
-    panel.style.left = `-${PANEL_OUTSIDE_OFFSET_PX}px`;
     panel.style.zIndex = "999999";
     panel.style.pointerEvents = "auto";
+
+    const saved = loadPanelPos();
+    if (saved) {
+      panel.style.left = `${saved.left}px`;
+      panel.style.top = `${saved.top}px`;
+    } else {
+      panel.style.top = "-72px";
+      panel.style.left = `-${PANEL_OUTSIDE_OFFSET_PX}px`;
+    }
+  }
+
+  // ---------- Drag manager (single global listeners; rebind handle per render) ----------
+  const dragState = {
+    active: false,
+    panel: null,
+    startX: 0,
+    startY: 0,
+    startLeft: 0,
+    startTop: 0,
+    parentRect: null,
+  };
+
+  function isTypingTarget(t) {
+    if (!(t instanceof HTMLElement)) return false;
+    return t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable;
+  }
+
+  function attachGlobalDragListenersOnce() {
+    if (window.__pacAliasDragListeners) return;
+    window.__pacAliasDragListeners = true;
+
+    window.addEventListener(
+      "pointermove",
+      (e) => {
+        if (!dragState.active || !dragState.panel) return;
+
+        const dx = e.clientX - dragState.startX;
+        const dy = e.clientY - dragState.startY;
+
+        const parentRect = dragState.parentRect;
+        if (!parentRect) return;
+
+        const newLeft = Math.round(dragState.startLeft + dx);
+        const newTop = Math.round(dragState.startTop + dy);
+
+        dragState.panel.style.left = `${newLeft}px`;
+        dragState.panel.style.top = `${newTop}px`;
+
+        savePanelPos(newLeft, newTop);
+
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      true
+    );
+
+    const stop = () => {
+      dragState.active = false;
+      dragState.panel = null;
+      dragState.parentRect = null;
+    };
+
+    window.addEventListener("pointerup", stop, true);
+    window.addEventListener("pointercancel", stop, true);
+  }
+
+  function enableDragging(panel, headerEl) {
+    if (!panel || !headerEl) return;
+
+    attachGlobalDragListenersOnce();
+
+    headerEl.style.cursor = "grab";
+
+    headerEl.addEventListener(
+      "pointerdown",
+      (e) => {
+        // don't start drag when clicking buttons in header
+        const target = e.target instanceof HTMLElement ? e.target : null;
+        if (!target) return;
+        if (isTypingTarget(target)) return;
+        if (target.closest("button")) return;
+
+        // compute current left/top relative to offsetParent
+        const parent = panel.offsetParent || panel.parentElement;
+        const parentRect = parent.getBoundingClientRect();
+        const rect = panel.getBoundingClientRect();
+
+        const currentLeft = rect.left - parentRect.left;
+        const currentTop = rect.top - parentRect.top;
+
+        dragState.active = true;
+        dragState.panel = panel;
+        dragState.startX = e.clientX;
+        dragState.startY = e.clientY;
+        dragState.startLeft = currentLeft;
+        dragState.startTop = currentTop;
+        dragState.parentRect = parentRect;
+
+        headerEl.style.cursor = "grabbing";
+
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      true
+    );
+
+    headerEl.addEventListener(
+      "pointerup",
+      () => {
+        headerEl.style.cursor = "grab";
+      },
+      true
+    );
   }
 
   // ---------- UI State ----------
@@ -349,7 +510,7 @@
 
   function mergeStores(base, incoming) {
     const out = loadStore();
-    out.players = (base && typeof base.players === "object") ? base.players : {};
+    out.players = base && typeof base.players === "object" ? base.players : {};
 
     const incPlayers = incoming?.players;
     if (incPlayers && typeof incPlayers === "object") {
@@ -379,8 +540,8 @@
       border: 4px solid #000;
       font-family: Jost, system-ui, sans-serif;
       font-size: 13px;
-      min-width: 280px;   /* narrower */
-      max-width: 360px;   /* narrower */
+      min-width: 280px;
+      max-width: 280px;
       box-shadow: 0 3px 5px rgba(0,0,0,.35);
       user-select: none;
       box-sizing: border-box;
@@ -467,6 +628,9 @@
       `;
       panel.appendChild(header);
 
+      // ? draggable by header
+      enableDragging(panel, header);
+
       const headerRow = document.createElement("div");
       headerRow.style.cssText = `display:flex;align-items:center;justify-content:space-between;gap:8px;`;
       header.appendChild(headerRow);
@@ -492,6 +656,9 @@
         flex: 1;
       `;
       left.appendChild(title);
+
+      const resetBtn = headerButton("?", "Reset panel position");
+      right.appendChild(wrapHeaderButton(resetBtn));
 
       const refreshBtn = headerButton("?", "Refresh");
       right.appendChild(wrapHeaderButton(refreshBtn));
@@ -546,7 +713,7 @@
       metaBtns.style.cssText = "display:flex;gap:6px;flex:0 0 auto;";
       meta.appendChild(metaBtns);
 
-      // ? Only one copy button now
+      // Only one copy button
       const copyBtn = document.createElement("button");
       copyBtn.textContent = "Copy to clipboard";
       copyBtn.style.cssText = smallButtonCss();
@@ -572,9 +739,7 @@
       aliasText.style.cssText = "line-height:1.35;opacity:.98;user-select:text;word-break:break-word;";
       aliasText.innerHTML =
         names2 && names2.length
-          ? names2
-              .map((n) => `<span style="font-weight:700;">${escapeHtml(n)}</span>`)
-              .join(`<span style="opacity:.8;">, </span>`)
+          ? names2.map((n) => `<span style="font-weight:700;">${escapeHtml(n)}</span>`).join(`<span style="opacity:.8;">, </span>`)
           : `<span style="opacity:.85;">No saved names yet.</span>`;
       aliasBlock.appendChild(aliasText);
 
@@ -721,6 +886,17 @@
       });
 
       // Events
+      resetBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        resetPanelPos(panel);
+        // optional: also save the default immediately so it “sticks”
+        const left = -PANEL_OUTSIDE_OFFSET_PX;
+        const top = -72;
+        savePanelPos(left, top);
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
+      });
+
       refreshBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         markModalNameSnapshot();
@@ -872,7 +1048,9 @@
   }
 
   function detachObserver() {
-    try { mo.disconnect(); } catch {}
+    try {
+      mo.disconnect();
+    } catch {}
     activeTarget = null;
   }
 
@@ -890,5 +1068,4 @@
     ensureParentsAllowOverflow();
     scheduleRender({ profileId: "", currentName: getCurrentModalName() });
   }
-
 })();
