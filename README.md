@@ -9,31 +9,39 @@ It helps you recognize players who frequently rename themselves, keep notes on k
 ## ✨ Features
 
 - 🧠 **Automatic Alias Tracking**  
-  Saves a player’s current name whenever you open their profile modal.
+  Saves the current player name every time you open their profile.
 
 - 🆔 **ID-Based Matching (No Mixups)**  
-  Names are stored under the player’s **profile/game-history ID** to avoid confusion.
+  Aliases are stored under the player’s **game-history ID**, ensuring accuracy even if names are reused.
 
-- 📌 **Overlay Panel Next to the Profile**  
-  A clean “PAC Aliases” panel appears beside the profile window.
+- 🔁 **Recency-Based Alias Ordering**  
+  If a player reuses an old name, it is automatically moved to the **top** of the alias list.  
+  Your main names will never be pushed out as long as they’re reused occasionally.
+
+- 📌 **Draggable Overlay Panel**  
+  Drag the **PAC Aliases** panel anywhere you want.  
+  The position is remembered automatically.
+
+- ♻️ **Reset Position Button**  
+  Instantly snap the panel back to its default position.
+
+- 🕶 **Stream-Safe ID Hiding**  
+  Player IDs are **masked by default** and only revealed when clicked (auto-hides again).
 
 - 🔍 **Global Alias Search**  
-  Search across all saved names to find what ID(s) a name belongs to.
+  Search across all saved aliases to see which ID(s) a name belongs to.
 
 - 📋 **Copy to Clipboard**  
-  Copy a player’s alias list (one name per line) with one click.
+  Copy a player’s alias list (one name per line) with a single click.
 
 - 💾 **Export / Import (Merge) JSON**  
-  Export your saved alias database and import/merge later (or share with friends).
+  Export your entire alias database or merge data from another browser or friend.
 
 - 🧹 **Clear Controls**  
-  Clear aliases for the current player only or wipe all saved data.
+  Clear aliases for the current player only or wipe everything.
 
-- 🕶 **Stream-Safe ID Hiding (Click to Reveal)**  
-  Player IDs are masked by default and only shown if you click them.
-
-- 🔄 **SPA-Aware**  
-  Works reliably with PAC navigation and re-renders when the profile modal changes.
+- 🔄 **SPA-Aware & Efficient**  
+  Works reliably with PAC’s single-page navigation and only runs while the profile modal is open.
 
 ---
 
@@ -69,43 +77,16 @@ It helps you recognize players who frequently rename themselves, keep notes on k
 
 | Action | How |
 |------|----|
+| Move panel | Drag the panel header |
+| Reset the panel position | **⟲** |
 | Refresh the panel | Click **↻** |
-| Copy aliases | Click **Copy to clipboard** |
+| Copy aliases to clipboard | Click **Copy** |
 | Export all data | Click **Export JSON** |
 | Import / merge data | Click **Import JSON** and paste your export |
 | Clear current player | Click **Clear This Player** |
 | Clear everything | Click **Clear ALL** |
 | Reveal hidden ID | Click the masked **ID** (auto-hides again) |
 | Reveal ID in search results | Click the masked ID next to a search hit |
-
----
-
-## ⚙️ Customization
-
-Open the script and adjust these values:
-
-### Panel horizontal position (left/right offset)
-
-```js
-const PANEL_OUTSIDE_OFFSET_PX = 377;
-```
-
-### Panel vertical position
-
-Inside `ensurePanelPosition(panel)`:
-
-```js
-panel.style.top = "-72px";
-```
-
-### Panel width
-
-Inside `createPanel()`:
-
-```js
-min-width: 280px;
-max-width: 360px;
-```
 
 ---
 
