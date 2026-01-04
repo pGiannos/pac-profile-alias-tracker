@@ -25,11 +25,8 @@ It helps you recognize players who frequently rename themselves, keep notes on k
 - ♻️ **Reset Position Button**  
   Instantly snap the panel back to its default position.
 
-- 🕶 **Stream-Safe ID Hiding**  
-  Player IDs are **masked by default** and only revealed when clicked (auto-hides again).
-
 - 🔍 **Global Alias Search**  
-  Search across all saved aliases to see which ID(s) a name belongs to.
+  Search across all saved aliases to see which ones have been saved before.
 
 - 📋 **Copy to Clipboard**  
   Copy a player’s alias list (one name per line) with a single click.
@@ -85,8 +82,6 @@ It helps you recognize players who frequently rename themselves, keep notes on k
 | Import / merge data | Click **Import JSON** and paste your export |
 | Clear current player | Click **Clear This Player** |
 | Clear everything | Click **Clear ALL** |
-| Reveal hidden ID | Click the masked **ID** (auto-hides again) |
-| Reveal ID in search results | Click the masked ID next to a search hit |
 
 ---
 
