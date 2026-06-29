@@ -2,7 +2,7 @@
 
 A lightweight userscript for **Pokémon Auto Chess** that tracks **past player names (aliases)** per **profile ID** whenever you open someone’s profile in the lobby.
 
-It helps you recognize players who frequently rename themselves, keep notes on known smurfs/alt names, and quickly search your stored alias history — without leaving the site.
+It helps you recognize players who frequently rename themselves, keep your own preferred “main name” for them, and quickly search your stored alias history — without leaving the site.
 
 ---
 
@@ -18,6 +18,10 @@ It helps you recognize players who frequently rename themselves, keep notes on k
   If a player reuses an old name, it is automatically moved to the **top** of the alias list.  
   Your main names will never be pushed out as long as they’re reused occasionally.
 
+- ⭐ **Editable Main Name**  
+  Save the name you personally know a player by.  
+  After saving, the field becomes read-only until you click **Edit**, so it is clear what is currently stored.
+
 - 📌 **Draggable Overlay Panel**  
   Drag the **PAC Aliases** panel anywhere you want.  
   The position is remembered automatically.
@@ -26,7 +30,10 @@ It helps you recognize players who frequently rename themselves, keep notes on k
   Instantly snap the panel back to its default position.
 
 - 🔍 **Global Alias Search**  
-  Search across all saved aliases to see which ones have been saved before.
+  Search across all saved aliases and main names.
+
+- 👤 **Clickable Saved Profiles**  
+  Search results open the saved alias profile inside the PAC Aliases panel, showing that player’s main name, latest known name, and full alias list.
 
 - 📋 **Copy to Clipboard**  
   Copy a player’s alias list (one name per line) with a single click.
@@ -77,6 +84,10 @@ It helps you recognize players who frequently rename themselves, keep notes on k
 | Move panel | Drag the panel header |
 | Reset the panel position | **⟲** |
 | Refresh the panel | Click **↻** |
+| Add or change main name | Click **Edit**, enter a name, then **Save** |
+| Clear main name | Click **Edit**, then **Clear** |
+| View a saved search result | Search a name, then click a result |
+| Return to the open PAC profile | Click **Current** after viewing a saved search result |
 | Copy aliases to clipboard | Click **Copy** |
 | Export all data | Click **Export JSON** |
 | Import / merge data | Click **Import JSON** and paste your export |
@@ -95,6 +106,10 @@ pac_profile_aliases_v1
 ```
 
 - No accounts, no servers, no syncing unless you export/import manually
+- Each stored profile can contain:
+  - `names`: automatically tracked alias history
+  - `mainName`: your manually chosen display name
+  - `lastSeen`: local timestamp used for sorting/search relevance
 
 ---
 

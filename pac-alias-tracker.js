@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PAC Profile Alias Tracker
 // @namespace    pac-helper
-// @description  Tracks past player names per PAC profile ID when opening the profile modal. Shows aliases, copy/export/import, and global search.
-// @version      1.1
+// @description  Tracks past player names per PAC profile ID when opening the profile modal. Shows aliases, editable main names, copy/export/import, and global search.
+// @version      1.3
 // @match        *://pokemon-auto-chess.com/*
 // @match        *://*.pokemon-auto-chess.com/*
 // @run-at       document-idle
@@ -80,9 +80,11 @@
     function ensurePlayer(store, id) {
         if (!store.players[id]) store.players[id] = {
             names: [],
+            mainName: "",
             lastSeen: Date.now()
         };
         if (!Array.isArray(store.players[id].names)) store.players[id].names = [];
+        if (typeof store.players[id].mainName !== "string") store.players[id].mainName = "";
         if (typeof store.players[id].lastSeen !== "number") store.players[id].lastSeen = Date.now();
         return store.players[id];
     }
@@ -116,6 +118,49 @@
         return {
             added: idx !== 0
         };
+    }
+
+    function normalizeSearchText(text) {
+        return String(text || "").trim().toLowerCase();
+    }
+
+    function getPlayerNames(player) {
+        return Array.isArray(player?.names) ? player.names.filter((n) => typeof n === "string" && n.trim()) : [];
+    }
+
+    function uniqueNames(names) {
+        const seen = new Set();
+        const out = [];
+        for (const name of names || []) {
+            const clean = String(name || "").trim();
+            if (!clean) continue;
+            const key = clean.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(clean);
+        }
+        return out;
+    }
+
+    function getLatestName(player) {
+        const names = getPlayerNames(player);
+        return names[0] || "";
+    }
+
+    function getMainName(player) {
+        return typeof player?.mainName === "string" ? player.mainName.trim() : "";
+    }
+
+    function getKnownName(player) {
+        return getMainName(player) || getLatestName(player) || "(unknown)";
+    }
+
+    function setMainName(store, id, mainName) {
+        if (!id) return;
+        const player = ensurePlayer(store, id);
+        player.mainName = String(mainName || "").trim();
+        player.lastSeen = Math.max(player.lastSeen || 0, Date.now());
+        saveStore(store);
     }
 
 
@@ -380,6 +425,9 @@
     let panelState = {
         profileId: "",
         currentName: "",
+        viewProfileId: "",
+        editingMainName: false,
+        mainNameSavedAt: 0,
         justAdded: false,
         searchQuery: "",
         importExpanded: false,
@@ -449,11 +497,46 @@
         } [c]));
     }
 
+    function getSearchMatches(store, q) {
+        const query = (q || "").trim();
+        const needle = normalizeSearchText(query);
+        if (!needle) return [];
+
+        const matches = [];
+        for (const [id, player] of Object.entries(store.players || {})) {
+            const names = getPlayerNames(player);
+            const mainName = getMainName(player);
+            const searchable = uniqueNames([mainName].concat(names));
+            const matchedNames = searchable.filter((name) => normalizeSearchText(name).includes(needle));
+            if (!matchedNames.length) continue;
+            matches.push({
+                id,
+                player,
+                names,
+                mainName,
+                matchedNames,
+                lastSeen: player?.lastSeen || 0
+            });
+        }
+
+        matches.sort((a, b) => {
+            const aPrimary = normalizeSearchText(a.mainName || a.names[0] || "");
+            const bPrimary = normalizeSearchText(b.mainName || b.names[0] || "");
+            const aStarts = aPrimary.startsWith(needle) ? 1 : 0;
+            const bStarts = bPrimary.startsWith(needle) ? 1 : 0;
+            if (aStarts !== bStarts) return bStarts - aStarts;
+            if (b.lastSeen !== a.lastSeen) return b.lastSeen - a.lastSeen;
+            return getKnownName(a.player).localeCompare(getKnownName(b.player));
+        });
+
+        return matches;
+    }
+
     function buildSearchHtml(store, q) {
         const query = (q || "").trim();
         if (!query) return `<div style="opacity:.85;">Search results will appear here.</div>`;
 
-        const hits = Object.keys(store.nameIndex || {}).filter((n) => n.includes(query));
+        const hits = getSearchMatches(store, query);
         if (hits.length === 0) {
             return `<div style="opacity:.85;">No matches for "<span style="font-family:monospace;">${escapeHtml(
                 query
@@ -463,17 +546,25 @@
         const limited = hits.slice(0, 30);
 
         let html = limited
-            .map((name) => {
-                const count = store.nameIndex?.[name]?.length || 0;
+            .map((hit) => {
+                const title = getKnownName(hit.player);
+                const latest = getLatestName(hit.player);
+                const matched = hit.matchedNames.slice(0, 4).join(", ");
+                const allNames = hit.names.slice(0, 8).join(", ");
                 return `
-        <div style="display:flex;gap:8px;align-items:center;margin:4px 0;">
-          <span style="font-weight:700;">${escapeHtml(name)}</span>
-          <span style="opacity:.75;">(${count} player${count === 1 ? "" : "s"})</span>
+        <div data-pac-alias-profile-id="${escapeHtml(hit.id)}" style="margin:4px 0;padding:7px;border-radius:8px;background:rgba(255,255,255,.06);cursor:var(--cursor-hover, pointer);">
+          <div style="display:flex;gap:6px;align-items:center;justify-content:space-between;">
+            <span style="font-weight:900;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(title)}</span>
+            <span style="opacity:.75;font-size:11px;flex:0 0 auto;">${hit.names.length} name${hit.names.length === 1 ? "" : "s"}</span>
+          </div>
+          ${latest && latest !== title ? `<div style="opacity:.82;font-size:12px;">Latest: <b>${escapeHtml(latest)}</b></div>` : ""}
+          <div style="opacity:.82;font-size:12px;">Matched: ${escapeHtml(matched)}</div>
+          <div style="opacity:.68;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(allNames)}</div>
         </div>`;
             })
             .join("");
 
-        if (hits.length > 30) html += `<div style="opacity:.7;margin-top:6px;">Showing first 30 name hits…</div>`;
+        if (hits.length > 30) html += `<div style="opacity:.7;margin-top:6px;">Showing first 30 profile hits...</div>`;
         return html;
     }
 
@@ -506,6 +597,9 @@
                 if (!id) continue;
                 const names = Array.isArray(p?.names) ? p.names.filter((x) => typeof x === "string" && x.trim()) : [];
                 const dst = ensurePlayer(out, id);
+                if (typeof p?.mainName === "string" && p.mainName.trim() && !dst.mainName) {
+                    dst.mainName = p.mainName.trim();
+                }
                 for (const n of names) {
                     if (!dst.names.includes(n)) dst.names.push(n);
                 }
@@ -603,7 +697,17 @@
 
 
             const store2 = loadStore();
-            const names2 = pid && store2.players?.[pid]?.names ? store2.players[pid].names : [];
+            if (panelState.viewProfileId && !store2.players?.[panelState.viewProfileId]) {
+                panelState.viewProfileId = "";
+            }
+            const activeId = panelState.viewProfileId || pid;
+            const activePlayer = activeId ? store2.players?.[activeId] : null;
+            const names2 = getPlayerNames(activePlayer);
+            const mainNameValue = getMainName(activePlayer);
+            const latestKnownName = getLatestName(activePlayer);
+            const viewingSavedProfile = Boolean(panelState.viewProfileId && panelState.viewProfileId !== pid);
+            const editingMainName = Boolean(activeId && (panelState.editingMainName || !mainNameValue));
+            const showMainSaved = Boolean(activeId && panelState.mainNameSavedAt && Date.now() - panelState.mainNameSavedAt < 1800);
 
             panel.innerHTML = "";
 
@@ -663,7 +767,9 @@
             leftMeta.style.cssText = "min-width:0;";
             meta.appendChild(leftMeta);
 
-            const shownName = currentName || "(unknown)";
+            const shownName = viewingSavedProfile
+                ? latestKnownName || getKnownName(activePlayer)
+                : currentName || latestKnownName || "(unknown)";
             const nameLine = document.createElement("div");
             nameLine.style.cssText = "display:flex;align-items:center;gap:8px;min-width:0;";
             leftMeta.appendChild(nameLine);
@@ -689,11 +795,91 @@
             metaBtns.style.cssText = "display:flex;gap:6px;flex:0 0 auto;";
             meta.appendChild(metaBtns);
 
+            let backToCurrentBtn = null;
+            if (viewingSavedProfile) {
+                backToCurrentBtn = document.createElement("button");
+                backToCurrentBtn.textContent = "Current";
+                backToCurrentBtn.title = "Return to the open PAC profile";
+                backToCurrentBtn.style.cssText = smallButtonCss();
+                metaBtns.appendChild(backToCurrentBtn);
+            }
+
             // Only one copy button
             const copyBtn = document.createElement("button");
             copyBtn.textContent = "Copy";
             copyBtn.style.cssText = smallButtonCss();
             metaBtns.appendChild(copyBtn);
+
+            const mainNameBlock = document.createElement("div");
+            mainNameBlock.style.cssText = `
+        margin-bottom:10px;padding:8px;border-radius:10px;
+        background: rgba(0,0,0,.18);
+        border: 1px solid rgba(255,255,255,.18);
+      `;
+            content.appendChild(mainNameBlock);
+
+            const mainNameLabel = document.createElement("div");
+            mainNameLabel.textContent = "Main name";
+            mainNameLabel.style.cssText = "font-weight:800;margin-bottom:6px;";
+            mainNameBlock.appendChild(mainNameLabel);
+
+            const mainNameRow = document.createElement("div");
+            mainNameRow.style.cssText = "display:flex;gap:6px;align-items:center;";
+            mainNameBlock.appendChild(mainNameRow);
+
+            let mainNameInput = null;
+            let saveMainBtn = null;
+            let clearMainBtn = null;
+            let editMainBtn = null;
+
+            if (editingMainName) {
+                mainNameInput = document.createElement("input");
+                mainNameInput.type = "text";
+                mainNameInput.placeholder = activeId ? "Name you know them by" : "Open a profile first";
+                mainNameInput.value = mainNameValue;
+                mainNameInput.disabled = !activeId;
+                mainNameInput.style.cssText = `
+        min-width:0;flex:1;padding:7px 8px;border-radius:8px;
+        border:1px solid rgba(255,255,255,.25);
+        outline:none;box-sizing:border-box;
+      `;
+                mainNameRow.appendChild(mainNameInput);
+
+                saveMainBtn = document.createElement("button");
+                saveMainBtn.textContent = "Save";
+                saveMainBtn.disabled = !activeId;
+                saveMainBtn.style.cssText = smallButtonCss();
+                mainNameRow.appendChild(saveMainBtn);
+
+                clearMainBtn = document.createElement("button");
+                clearMainBtn.textContent = "Clear";
+                clearMainBtn.disabled = !activeId || !mainNameValue;
+                clearMainBtn.style.cssText = smallButtonCss(true);
+                mainNameRow.appendChild(clearMainBtn);
+            } else {
+                const mainNameText = document.createElement("div");
+                mainNameText.textContent = mainNameValue || "No main name set";
+                mainNameText.style.cssText = `
+        min-width:0;flex:1;padding:7px 8px;border-radius:8px;
+        background:rgba(255,255,255,.08);
+        border:1px solid rgba(255,255,255,.12);
+        font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+      `;
+                mainNameRow.appendChild(mainNameText);
+
+                editMainBtn = document.createElement("button");
+                editMainBtn.textContent = "Edit";
+                editMainBtn.disabled = !activeId;
+                editMainBtn.style.cssText = smallButtonCss();
+                mainNameRow.appendChild(editMainBtn);
+            }
+
+            if (showMainSaved) {
+                const savedMsg = document.createElement("div");
+                savedMsg.textContent = "Saved";
+                savedMsg.style.cssText = "margin-top:6px;color:#3bc95e;font-weight:900;font-size:12px;";
+                mainNameBlock.appendChild(savedMsg);
+            }
 
             // Aliases
             const aliasBlock = document.createElement("div");
@@ -719,7 +905,7 @@
                 `<span style="opacity:.85;">No saved names yet.</span>`;
             aliasBlock.appendChild(aliasText);
 
-            // Actions — split into two rows
+            // Actions â€” split into two rows
             const actionsWrap = document.createElement("div");
             actionsWrap.style.cssText = "display:flex;flex-direction:column;gap:6px;margin-top:10px;";
             content.appendChild(actionsWrap);
@@ -842,7 +1028,7 @@
             resetBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
                 resetPanelPos(panel);
-                // optional: also save the default immediately so it “sticks”
+                // optional: also save the default immediately so it â€œsticksâ€
                 const left = -PANEL_OUTSIDE_OFFSET_PX;
                 const top = -72;
                 savePanelPos(left, top);
@@ -858,9 +1044,57 @@
                 scheduleRender({});
             });
 
+            if (backToCurrentBtn) {
+                backToCurrentBtn.addEventListener("click", () => {
+                panelState.viewProfileId = "";
+                panelState.editingMainName = false;
+                panelState.mainNameSavedAt = 0;
+                panelState.justAdded = false;
+                scheduleRender({});
+            });
+            }
+
+            function saveMainNameFromInput() {
+                if (!activeId || !mainNameInput) return;
+                const storeNow = loadStore();
+                setMainName(storeNow, activeId, mainNameInput.value);
+                panelState.editingMainName = false;
+                panelState.mainNameSavedAt = Date.now();
+                scheduleRender({});
+                setTimeout(() => scheduleRender({}), 1900);
+            }
+
+            if (saveMainBtn) saveMainBtn.addEventListener("click", saveMainNameFromInput);
+            if (mainNameInput) {
+                mainNameInput.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        saveMainNameFromInput();
+                    }
+                });
+            }
+            if (clearMainBtn) {
+                clearMainBtn.addEventListener("click", () => {
+                    if (!activeId) return;
+                    const storeNow = loadStore();
+                    setMainName(storeNow, activeId, "");
+                    panelState.editingMainName = true;
+                    panelState.mainNameSavedAt = Date.now();
+                    scheduleRender({});
+                    setTimeout(() => scheduleRender({}), 1900);
+                });
+            }
+            if (editMainBtn) {
+                editMainBtn.addEventListener("click", () => {
+                    panelState.editingMainName = true;
+                    panelState.mainNameSavedAt = 0;
+                    scheduleRender({});
+                });
+            }
+
             copyBtn.addEventListener("click", async () => {
                 const storeNow = loadStore();
-                const list = Array.isArray(storeNow.players?.[pid]?.names) ? storeNow.players[pid].names : [];
+                const list = getPlayerNames(storeNow.players?.[activeId]);
                 await safeCopy(list.join("\n"));
                 flashButton(copyBtn);
             });
@@ -877,12 +1111,13 @@
             });
 
             clearPlayerBtn.addEventListener("click", () => {
-                if (!pid) return;
+                if (!activeId) return;
                 const storeNow = loadStore();
-                delete storeNow.players[pid];
+                delete storeNow.players[activeId];
                 rebuildIndex(storeNow);
                 saveStore(storeNow);
                 panelState.justAdded = false;
+                if (panelState.viewProfileId === activeId) panelState.viewProfileId = "";
                 scheduleRender({});
             });
 
@@ -897,6 +1132,19 @@
                 const storeNow = loadStore();
                 const resultsEl = document.getElementById(SEARCH_RESULTS_ID);
                 if (resultsEl) resultsEl.innerHTML = buildSearchHtml(storeNow, panelState.searchQuery);
+            });
+
+            searchResults.addEventListener("click", (e) => {
+                const target = e.target instanceof HTMLElement ? e.target : null;
+                const row = target?.closest?.("[data-pac-alias-profile-id]");
+                if (!row) return;
+                const selectedId = row.getAttribute("data-pac-alias-profile-id") || "";
+                if (!selectedId) return;
+                panelState.viewProfileId = selectedId;
+                panelState.justAdded = false;
+                panelState.editingMainName = false;
+                panelState.mainNameSavedAt = 0;
+                scheduleRender({});
             });
         } finally {
             isRendering = false;
@@ -920,6 +1168,9 @@
             scheduleRender({
                 profileId: id,
                 currentName: nameNow || nameAtRequest,
+                viewProfileId: "",
+                editingMainName: false,
+                mainNameSavedAt: 0,
                 justAdded: false
             });
         }
@@ -942,6 +1193,9 @@
                         scheduleRender({
                             profileId: id,
                             currentName: nameNow || nameAtRequest,
+                            viewProfileId: "",
+                            editingMainName: false,
+                            mainNameSavedAt: 0,
                             justAdded: false
                         });
                     }
@@ -984,6 +1238,9 @@
                     scheduleRender({
                         currentName: nameNow,
                         profileId: "",
+                        viewProfileId: "",
+                        editingMainName: false,
+                        mainNameSavedAt: 0,
                         justAdded: false
                     });
                 } else {
@@ -1041,7 +1298,10 @@
         ensureParentsAllowOverflow();
         scheduleRender({
             profileId: "",
-            currentName: getCurrentModalName()
+            currentName: getCurrentModalName(),
+            viewProfileId: "",
+            editingMainName: false,
+            mainNameSavedAt: 0
         });
     }
 })();
